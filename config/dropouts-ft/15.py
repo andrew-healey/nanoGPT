@@ -1,10 +1,12 @@
 import time
 
+wandb_project = 'dropout_size_compare_ft'
+
 out_dir = 'out-shakespeare'
 eval_interval = 5
 eval_iters = 40
 wandb_log = False # feel free to turn on
-wandb_project = 'shakespeare'
+# wandb_project = 'shakespeare'
 wandb_run_name = 'ft-' + str(time.time())
 
 dataset = 'shakespeare-char'
@@ -23,3 +25,4 @@ max_iters = 20
 # finetune at constant LR
 learning_rate = 3e-5
 decay_lr = False
+dropout=0.15

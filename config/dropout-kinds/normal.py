@@ -1,6 +1,8 @@
 # train a miniature character-level shakespeare model
 # good for debugging and playing on macbooks and such
 
+wandb_project = 'dropout_kind_compare'
+
 out_dir = 'out-shakespeare-char'
 eval_interval = 250 # keep frequent because we'll overfit
 eval_iters = 200
@@ -10,7 +12,7 @@ log_interval = 10 # don't print too too often
 always_save_checkpoint = False
 
 wandb_log = False # override via command line if you like
-wandb_project = 'shakespeare-char'
+# wandb_project = 'shakespeare-char'
 wandb_run_name = 'mini-gpt'
 
 dataset = 'shakespeare_char'
@@ -23,6 +25,9 @@ n_layer = 6
 n_head = 6
 n_embd = 384
 dropout = 0.2
+dropout_attn = 0.2
+
+dropout_kind = 'normal'
 
 learning_rate = 1e-3 # with baby networks can afford to go a bit higher
 max_iters = 5000
