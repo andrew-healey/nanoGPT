@@ -70,6 +70,9 @@ LayerDropout    = lambda p: DimDropout(p,(0))
 
 Block2Dropout = lambda p: BlockDropout(p,2)
 Block10Dropout = lambda p: BlockDropout(p,10)
+Block16Dropout = lambda p: BlockDropout(p,16)
+Block32Dropout = lambda p: BlockDropout(p,32)
+Block64Dropout = lambda p: BlockDropout(p,64)
 Block50Dropout = lambda p: BlockDropout(p,50)
 
 class LayerNorm(nn.Module):
@@ -90,6 +93,12 @@ def get_dropout(config):
         return Block10Dropout
     if config.dropout_kind == "block-50":
         return Block50Dropout
+    if config.dropout_kind == "block-16":
+        return Block16Dropout
+    if config.dropout_kind == "block-32":
+        return Block32Dropout
+    if config.dropout_kind == "block-64":
+        return Block64Dropout
     if config.dropout_kind == "layer":
         return Identity # layer dropout is performed manually
     if config.dropout_kind == "token":
