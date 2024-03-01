@@ -15,6 +15,30 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+class BlockDropout(nn.Module):
+  def __init__(self,p:float=0.5,block_size:float=2):
+    super(BlockDropout,self).__init__()
+
+    assert p <= 1 and p >= 0
+    self.p = p
+    self.block_size = block_size
+  def forward(self,x):
+    if self.training:
+      og_x = x
+      *B,C = x.shape
+      with torch.no_grad():
+        # include C candidate vectors-to-zero for every instance of a channel
+        dropout_mask = torch.rand(x.shape,device=x.device) > self.p # i.e. this is 1 if you're *keeping* an element
+        N = C // self.block_size
+        R = C % self.block_size
+        dropout_mask[...,:N*self.block_size] = dropout_mask[...,:N].reshape(-1).repeat_interleave(self.block_size).view(*B,N*self.block_size)
+        max_idx = min(N*self.block_size,C-1)
+        dropout_mask[...,max_idx:] = dropout_mask[...,[max_idx]]
+
+      return x * dropout_mask.clone() / (1-self.p)
+
+    return x
+
 from typing import Tuple
 class DimDropout(nn.Module):
   def __init__(self,unique_dims:Tuple[int],p:float=0.5):
@@ -35,9 +59,18 @@ class DimDropout(nn.Module):
       return x * dropout_mask.clone() / (1-self.p)
     return x
 
+class Identity(nn.Module):
+    def forward(self,x):
+        return x
+
 HeadDropout     = lambda p: DimDropout(p,(0,1,-2)) # Apply this to the head-expanded hidden state (B,nh,T,hs)
 TokenDropout    = lambda p: DimDropout(p,(0,1))
+LayerDropout    = lambda p: DimDropout(p,(0))
 # ChannelDropout  = lambda p: DimDropout(p,(2))
+
+Block2Dropout = lambda p: BlockDropout(p,2)
+Block10Dropout = lambda p: BlockDropout(p,10)
+Block50Dropout = lambda p: BlockDropout(p,50)
 
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
@@ -50,6 +83,19 @@ class LayerNorm(nn.Module):
     def forward(self, input):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
 
+def get_dropout(config):
+    if config.dropout_kind == "block-2":
+        return Block2Dropout
+    if config.dropout_kind == "block-10":
+        return Block10Dropout
+    if config.dropout_kind == "block-50":
+        return Block50Dropout
+    if config.dropout_kind == "layer":
+        return Identity # layer dropout is performed manually
+    if config.dropout_kind == "token":
+        return TokenDropout
+    return nn.Dropout
+
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
@@ -60,8 +106,8 @@ class CausalSelfAttention(nn.Module):
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
-        self.attn_dropout = HeadDropout(config.dropout) if config.dropout_kind == "head" else TokenDropout(config.dropout) if config.dropout_kind == "token" else nn.Dropout(config.dropout)
-        self.resid_dropout = TokenDropout(config.dropout) if config.dropout_kind == "token" else nn.Dropout(config.dropout)
+        self.attn_dropout = HeadDropout(config.dropout) if config.dropout_kind == "head" else get_dropout(config)(config.dropout)
+        self.resid_dropout = get_dropout(config)(config.dropout)
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
@@ -106,7 +152,7 @@ class MLP(nn.Module):
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
         self.gelu    = nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
-        self.dropout = TokenDropout(config.dropout) if config.dropout_kind == "token" else nn.Dropout(config.dropout)
+        self.dropout = get_dropout(config)(config.dropout)
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -123,10 +169,16 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
+        self.dropout_kind = config.dropout_kind
+        self.dropout = config.dropout
 
-    def forward(self, x):
+    def forward(self, x_og):
+        x = x_og
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
+        if self.dropout_kind == 'layer':
+            mask = torch.rand(x.shape[0]) > self.dropout
+            return x * mask + x_og * (1-mask)
         return x
 
 @dataclass
@@ -151,7 +203,7 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
-            drop = TokenDropout(config.dropout) if config.dropout_kind == "token" else nn.Dropout(config.dropout),
+            drop = get_dropout(config)(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))

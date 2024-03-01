@@ -1,7 +1,7 @@
 # train a miniature character-level shakespeare model
 # good for debugging and playing on macbooks and such
 
-wandb_project = 'dropout_kind_compare'
+wandb_project = 'dropout_kind_compare_2'
 
 out_dir = 'out-shakespeare-char'
 eval_interval = 250 # keep frequent because we'll overfit
@@ -24,8 +24,7 @@ block_size = 256 # context of up to 256 previous characters
 n_layer = 6
 n_head = 6
 n_embd = 384
-dropout = 0.2
-dropout_attn = 0.2
+dropout = 0.25
 
 dropout_kind = 'normal'
 
