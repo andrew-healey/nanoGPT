@@ -15,33 +15,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from torch.nn import Dropout
-
-## DROPOUT
-class BlockDropout(nn.Module):
-  def __init__(self,p:float=0.5,block_size:float=2):
-    super(BlockDropout,self).__init__()
-
-    assert p <= 1 and p >= 0
-    self.p = p
-    self.block_size = block_size
-  def forward(self,x):
-    if self.training:
-      og_x = x
-      *B,C = x.shape
-      with torch.no_grad():
-        # include C candidate vectors-to-zero for every instance of a channel
-        dropout_mask = torch.rand(x.shape,device=x.device) > self.p # i.e. this is 1 if you're *keeping* an element
-        N = C // self.block_size
-        R = C % self.block_size
-        dropout_mask[...,:N*self.block_size] = dropout_mask[...,:N].reshape(-1).repeat_interleave(self.block_size).view(*B,N*self.block_size)
-        max_idx = min(N*self.block_size,C-1)
-        dropout_mask[...,max_idx:] = dropout_mask[...,[max_idx]]
-
-      return x * dropout_mask.clone() / (1-self.p)
-
-    return x
-
 from typing import Tuple
 class DimDropout(nn.Module):
   def __init__(self,unique_dims:Tuple[int],p:float=0.5):
@@ -63,21 +36,7 @@ class DimDropout(nn.Module):
 
 HeadDropout     = lambda p: DimDropout(p,(0,1,2)) # Apply this to the head-expanded hidden state (B,nh,T,hs)
 TokenDropout    = lambda p: DimDropout(p,(0,1))
-ChannelDropout  = lambda p: DimDropout(p,(2))
-## /DROPOUT
-
-def get_dropout(config,p):
-    dropout_kind = config.dropout_kind
-    if dropout_kind == 'normal':
-        return nn.Dropout(p)
-    if dropout_kind == 'block':
-        return BlockDropout(p,config.dp_block_size)
-    if dropout_kind == 'token':
-        return TokenDropout(p)
-    if dropout_kind == 'head':
-        return HeadDropout(p)
-
-    raise Exception(f"Unexpected dropout_kind {dropout_kind}")
+# ChannelDropout  = lambda p: DimDropout(p,(2))
 
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
@@ -100,14 +59,13 @@ class CausalSelfAttention(nn.Module):
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
-        self.attn_dropout = get_dropout(config,config.dropout_attn)
-        self.resid_dropout = get_dropout(config,config.dropout)
+        self.attn_dropout = HeadDropout(config.dropout) if config.dropout_kind == "head" else nn.Dropout(config.dropout)
+        self.resid_dropout = TokenDropout(config.dropout) if config.dropout_kind == "token" else nn.Dropout(config.dropout)
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
-        self.dropout_attn = config.dropout_attn
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
-        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention') and config.flash
+        self.flash = False and hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
@@ -126,7 +84,7 @@ class CausalSelfAttention(nn.Module):
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout_attn if self.training else 0, is_causal=True)
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
         else:
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
@@ -147,7 +105,7 @@ class MLP(nn.Module):
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
         self.gelu    = nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
-        self.dropout = nn.Dropout(config.dropout)
+        self.dropout = TokenDropout(config.dropout) if config.dropout_kind == "token" else nn.Dropout(config.dropout)
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -178,10 +136,7 @@ class GPTConfig:
     n_head: int = 12
     n_embd: int = 768
     dropout: float = 0.0
-    dropout_attn: float = 0.0
-    dropout_kind: str = 'normal'
-    dp_block_size: int = 2
-    flash: bool = True
+    dropout_kind: str = "normal"
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
 class GPT(nn.Module):
@@ -195,7 +150,7 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
-            drop = get_dropout(config,config.dropout),
+            drop = TokenDropout(config.dropout) if config.dropout_kind == "token" else nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
@@ -246,6 +201,9 @@ class GPT(nn.Module):
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
+
+
+
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
@@ -296,9 +254,6 @@ class GPT(nn.Module):
         if 'dropout' in override_args:
             print(f"overriding dropout rate to {override_args['dropout']}")
             config_args['dropout'] = override_args['dropout']
-        if 'dropout_attn' in override_args:
-            print(f"overriding dropout_attn rate to {override_args['dropout_attn']}")
-            config_args['dropout_attn'] = override_args['dropout_attn']
         # create a from-scratch initialized minGPT model
         config = GPTConfig(**config_args)
         model = GPT(config)
