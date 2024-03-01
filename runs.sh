@@ -31,4 +31,11 @@ while true; do
 
     python train.py config/dropout-kinds/layer.py --wandb_log=True --dropout_kind=head_and_layer
     python train.py config/dropout-kinds/layer.py --wandb_log=True --dropout_kind=head_and_layer
+
+    python train.py config/dropout-kinds/layer.py --wandb_log=True --dropout_kind=head_and_layer --dropout=0.2
+    python train.py config/dropout-kinds/layer.py --wandb_log=True --dropout_kind=head_and_layer
+
+    python train.py config/dropout-kinds/layer.py --wandb_log=True --dropout_kind=block-32_and_layer
+    python train.py config/dropout-kinds/layer.py --wandb_log=True --dropout_kind=block-16_and_layer
+    python train.py config/dropout-kinds/layer.py --wandb_log=True --dropout_kind=block-50_and_layer
 done

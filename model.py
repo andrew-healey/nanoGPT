@@ -87,21 +87,21 @@ class LayerNorm(nn.Module):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
 
 def get_dropout(config):
-    if config.dropout_kind == "block-2":
+    if "block-2" in config.dropout_kind:
         return Block2Dropout
-    if config.dropout_kind == "block-10":
+    if "block-10" in config.dropout_kind:
         return Block10Dropout
-    if config.dropout_kind == "block-50":
+    if "block-50" in config.dropout_kind:
         return Block50Dropout
-    if config.dropout_kind == "block-16":
+    if "block-16" in config.dropout_kind:
         return Block16Dropout
-    if config.dropout_kind == "block-32":
+    if "block-32" in config.dropout_kind:
         return Block32Dropout
-    if config.dropout_kind == "block-64":
+    if "block-64" in config.dropout_kind:
         return Block64Dropout
     if config.dropout_kind == "layer":
         return Identity # layer dropout is performed manually
-    if config.dropout_kind == "token":
+    if "token" in config.dropout_kind:
         return TokenDropout
     return nn.Dropout
 
