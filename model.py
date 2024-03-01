@@ -115,13 +115,13 @@ class CausalSelfAttention(nn.Module):
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
-        self.attn_dropout = HeadDropout(config.dropout) if config.dropout_kind == "head" else get_dropout(config)(config.dropout)
+        self.attn_dropout = HeadDropout(config.dropout) if "head" in config.dropout_kind else get_dropout(config)(config.dropout)
         self.resid_dropout = get_dropout(config)(config.dropout)
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
-        self.flash = config.dropout_kind != "head" and hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        self.flash = "head" not in config.dropout_kind and hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
@@ -185,7 +185,7 @@ class Block(nn.Module):
         x = x_og
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
-        if self.dropout_kind == 'layer':
+        if "layer" in self.dropout_kind:
             mask = torch.rand(x.shape[0]) > self.dropout
             return x * mask + x_og * (1-mask)
         return x
