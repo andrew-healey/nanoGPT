@@ -25,16 +25,17 @@ class DimDropout(nn.Module):
     self.unique_dims = unique_dims
   def forward(self,x):
     if self.training:
+      new_unique_dims = tuple(x.shape.length + b if b < 0 else b for b in self.unique_dims)
       og_x = x
       with torch.no_grad():
         # include C candidate vectors-to-zero for every instance of a channel
-        copied_shape = tuple(g if i in self.unique_dims else 1 for i,g in enumerate(x.shape))
+        copied_shape = tuple(g if i in new_unique_dims else 1 for i,g in enumerate(x.shape))
         dropout_mask = torch.rand(copied_shape,device=x.device) > self.p # i.e. this is 1 if you're *keeping* an element
 
       return x * dropout_mask.clone() / (1-self.p)
     return x
 
-HeadDropout     = lambda p: DimDropout(p,(0,1,2)) # Apply this to the head-expanded hidden state (B,nh,T,hs)
+HeadDropout     = lambda p: DimDropout(p,(0,1,-2)) # Apply this to the head-expanded hidden state (B,nh,T,hs)
 TokenDropout    = lambda p: DimDropout(p,(0,1))
 # ChannelDropout  = lambda p: DimDropout(p,(2))
 
@@ -59,7 +60,7 @@ class CausalSelfAttention(nn.Module):
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
-        self.attn_dropout = HeadDropout(config.dropout) if config.dropout_kind == "head" else nn.Dropout(config.dropout)
+        self.attn_dropout = HeadDropout(config.dropout) if config.dropout_kind == "head" else TokenDropout(config.dropout) if config.dropout_kind == "token" else nn.Dropout(config.dropout)
         self.resid_dropout = TokenDropout(config.dropout) if config.dropout_kind == "token" else nn.Dropout(config.dropout)
         self.n_head = config.n_head
         self.n_embd = config.n_embd
